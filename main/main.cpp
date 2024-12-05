@@ -7,10 +7,12 @@
 #include "esp_event.h"
 #include "esp_log.h"
 
+#include <server.h>
+#include <motion_detector.h>
+#include <gprs_modem.h>
+
 namespace AntiTheftMonitor
 {
-extern "C" void tcp_server_task(void* params);
-extern "C" void udp_server_task(void* params);
 extern "C" void pir_monitor_task(void* params);
 }
 
@@ -31,13 +33,22 @@ esp_event_loop_handle_t create_main_event_loop()
 }
 using namespace AntiTheftMonitor;
 
+Server * srv {nullptr};
+MotionDetector * motd {nullptr};
+GprsModem *modem {nullptr};
+esp_event_loop_handle_t main_event_loop {nullptr};
+
 extern "C" void app_main()
 {
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    void* main_event_loop = create_main_event_loop();
 
-    xTaskCreate(tcp_server_task,"tcp-server",   4096, main_event_loop,  5, NULL);
-    xTaskCreate(pir_monitor_task,"pir-monitor", 4096, main_event_loop,  5, NULL);
+    main_event_loop = create_main_event_loop();
+    srv = Server::create_instance(main_event_loop,"tcp");
+    motd = MotionDetector::create_instance(main_event_loop);
+    modem = GprsModem::create_instance(main_event_loop);
+
+    srv->run();
+    motd->run();
+    modem->run();
 }

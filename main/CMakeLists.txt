@@ -1,9 +1,11 @@
 idf_component_register(
 SRCS 
     main.cpp
-    server.cpp
     pir_monitor.cpp
 INCLUDE_DIRS 
     .
-    ../include
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/components/motion_detector
+    ${CMAKE_SOURCE_DIR}/components/server
+    ${CMAKE_SOURCE_DIR}/components/gprs_modem
 )

@@ -6,7 +6,6 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
 #include "esp_netif.h"
 
 #include "lwip/err.h"
@@ -15,6 +14,7 @@
 #include <lwip/netdb.h>
 
 #include <common.h>
+#include <server.h>
 
 #define PORT                        1234
 #define KEEPALIVE_IDLE              30
@@ -141,46 +141,80 @@ int connect_tcp_socket(int listen_sock)
     return sock;
 }
 
-void handle_incomming_data(int sock, esp_event_loop_handle_t event_loop)
+}
+
+struct TcpServer : public Server
 {
-    uint8_t rx_buffer[512];
-    int nbytes;
-    do
+    TcpServer(esp_event_loop_handle_t el) : event_loop(el)
     {
-        nbytes = recv(sock, rx_buffer, sizeof(rx_buffer), 0);
-        if (nbytes < 0) {
-            ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
-        } else if (nbytes == 0) {
-            ESP_LOGW(TAG, "Connection closed");
-        } else 
-        {
-            ESP_ERROR_CHECK(esp_event_post_to(event_loop, ANTITHEFT_APP_EVENTS, 0, rx_buffer, nbytes, portMAX_DELAY));
+        listen_sock = initialize_tcp_socket_ipv4(TCP_PORT);
+    }
+    bool run() override
+    {
+        if (listen_sock < 0) {
+            return false;
         }
-    } while(nbytes > 0);
-}
-}
-
-namespace AntiTheftMonitor
-{
-extern "C" void tcp_server_task(void* params)
-{
-    auto event_loop = reinterpret_cast<esp_event_loop_handle_t>(params);
-    int listen_sock = initialize_tcp_socket_ipv4(TCP_PORT);
-    if (listen_sock < 0) {
-        vTaskDelete(NULL);
-        return;
+        xTaskCreate(task_main,"tcp-server",   4096, event_loop,  5, &task_handle);
+        return true;
     }
-
-    for(;;)
+    void stop() override
     {
-        int sock = connect_tcp_socket(listen_sock);
-        if (sock < 0) continue;
-        handle_incomming_data(sock,event_loop);
-        shutdown(sock, 0);
-        close(sock);
+        vTaskDelete(task_handle);
+        task_handle = nullptr;
+    }
+    void release() override
+    {
+        if (task_handle) {
+            stop();
+        }
+        delete this;
+    }
+    void handle_incomming_data(int sock)
+    {
+        uint8_t rx_buffer[512];
+        int nbytes;
+        do
+        {
+            nbytes = recv(sock, rx_buffer, sizeof(rx_buffer), 0);
+            if (nbytes < 0) {
+                ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
+            } else if (nbytes == 0) {
+                ESP_LOGW(TAG, "Connection closed");
+            } else 
+            {
+                ESP_ERROR_CHECK(esp_event_post_to(event_loop, ANTITHEFT_APP_EVENTS, 0, rx_buffer, nbytes, portMAX_DELAY));
+            }
+        } while(nbytes > 0);
     }
 
-    close(listen_sock);
-    vTaskDelete(NULL);
-}
+    static void task_main(void *params)
+    {
+        auto inst = *static_cast<TcpServer*>(params);
+
+        for(;;)
+        {
+            int sock = connect_tcp_socket(inst.listen_sock);
+            if (sock < 0) continue;
+            inst.handle_incomming_data(sock);
+            shutdown(sock, 0);
+            close(sock);
+        }
+
+        close(inst.listen_sock);
+        inst.listen_sock = -1;
+        vTaskDelete(NULL);
+    }
+
+    int listen_sock {-1};
+    esp_event_loop_handle_t event_loop {nullptr};
+    TaskHandle_t task_handle {nullptr};
+};
+
+Server* Server::create_instance(esp_event_loop_handle_t event_loop,const char* type)
+{ 
+    if (0==strcmp(type,"tcp")) {
+        return new TcpServer(event_loop);
+    }
+    ESP_LOGE("SRV","Invalid type specified %s",type);
+    return nullptr;
 }
