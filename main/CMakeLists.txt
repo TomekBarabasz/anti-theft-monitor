@@ -1,0 +1,9 @@
+idf_component_register(
+SRCS 
+    main.cpp
+    server.cpp
+    pir_monitor.cpp
+INCLUDE_DIRS 
+    .
+    ../include
+)
