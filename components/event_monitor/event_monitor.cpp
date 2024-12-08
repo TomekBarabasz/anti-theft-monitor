@@ -11,7 +11,10 @@
 
 const char *TAG = "EVMON";
 
+ESP_EVENT_DEFINE_BASE(MONITOR_BASED_EVENTS);
+
 namespace {
+    
 EventMonitor* monitor_instance {nullptr};
 }
 EventMonitor* EventMonitor::get_instance() { return monitor_instance;}
@@ -35,12 +38,12 @@ struct UdpEventMonitor : public EventMonitor
             sockfd = -1;
         }
         event_loop = create_event_loop();
-        ESP_ERROR_CHECK(esp_event_handler_instance_register_with(event_loop, ANTITHEFT_APP_EVENTS, ESP_EVENT_ANY_ID, UdpEventMonitor::event_handler, this, &event_handler_instance));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register_with(event_loop, MONITOR_BASED_EVENTS, ESP_EVENT_ANY_ID, UdpEventMonitor::event_handler, this, &event_handler_instance));
     }
     bool send(std::string&& event) override
     {
         auto * ev = new std::string( std::move(event) );
-        return esp_event_post_to(event_loop, ANTITHEFT_APP_EVENTS, 0, ev, ev->size(), portMAX_DELAY) == ESP_OK;
+        return esp_event_post_to(event_loop, MONITOR_BASED_EVENTS, 0, ev, ev->size(), portMAX_DELAY) == ESP_OK;
     }
     bool good() const { return sockfd > 0; }
     explicit operator bool() const { return good(); }
@@ -49,7 +52,7 @@ struct UdpEventMonitor : public EventMonitor
     {
         close(sockfd);
         sockfd = -1;
-        esp_event_handler_instance_unregister_with(event_loop,ANTITHEFT_APP_EVENTS, ESP_EVENT_ANY_ID,event_handler_instance);
+        esp_event_handler_instance_unregister_with(event_loop, MONITOR_BASED_EVENTS, ESP_EVENT_ANY_ID,event_handler_instance);
         esp_event_loop_delete(event_loop);
         event_loop = nullptr;
         monitor_instance = nullptr;

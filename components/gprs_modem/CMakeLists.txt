@@ -1,9 +1,0 @@
-idf_component_register(
-SRCS
-    gprs_modem.cpp
-INCLUDE_DIRS
-    .
-    ${CMAKE_SOURCE_DIR}/include
-REQUIRES
-    esp_event
-)

@@ -1,6 +1,8 @@
 idf_component_register(
 SRCS
-    server.cpp
+    tcp_controller.cpp
+    gprs_controller.cpp
+    controller.cpp
 INCLUDE_DIRS 
     .
     ${CMAKE_SOURCE_DIR}/include

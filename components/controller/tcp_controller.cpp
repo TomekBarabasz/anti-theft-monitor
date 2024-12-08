@@ -14,7 +14,7 @@
 #include <lwip/netdb.h>
 
 #include <common.h>
-#include <server.h>
+#include <controller.h>
 
 #define PORT                        1234
 #define KEEPALIVE_IDLE              30
@@ -23,9 +23,10 @@
 #define CONFIG_EXAMPLE_IPV4
 
 namespace {
-constexpr int TCP_PORT = 5555;
-constexpr int UDP_PORT = 6666;
+constexpr int DEFAULT_TCP_PORT = 5555;
+constexpr int DEFAULT_UDP_PORT = 6666;
 const char *TAG = "WIFI";
+
 int initialize_tcp_socket_ipv4(int port)
 {
     struct sockaddr_storage dest_addr;
@@ -140,14 +141,13 @@ int connect_tcp_socket(int listen_sock)
     ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
     return sock;
 }
-
 }
 
-struct TcpServer : public Server
+struct TcpController : public Controller
 {
-    TcpServer(esp_event_loop_handle_t el) : event_loop(el)
+    TcpController(esp_event_loop_handle_t el, int port) : event_loop(el)
     {
-        listen_sock = initialize_tcp_socket_ipv4(TCP_PORT);
+        listen_sock = initialize_tcp_socket_ipv4(port);
     }
     bool run() override
     {
@@ -182,14 +182,14 @@ struct TcpServer : public Server
                 ESP_LOGW(TAG, "Connection closed");
             } else 
             {
-                ESP_ERROR_CHECK(esp_event_post_to(event_loop, ANTITHEFT_APP_EVENTS, 0, rx_buffer, nbytes, portMAX_DELAY));
+                ESP_ERROR_CHECK(esp_event_post_to(event_loop, EXTERNAL_COMMAND_EVENTS, 0, rx_buffer, nbytes, portMAX_DELAY));
             }
         } while(nbytes > 0);
     }
 
     static void task_main(void *params)
     {
-        auto inst = *static_cast<TcpServer*>(params);
+        auto inst = *static_cast<TcpController*>(params);
 
         for(;;)
         {
@@ -210,11 +210,8 @@ struct TcpServer : public Server
     TaskHandle_t task_handle {nullptr};
 };
 
-Server* Server::create_instance(esp_event_loop_handle_t event_loop,const char* type)
-{ 
-    if (0==strcmp(type,"tcp")) {
-        return new TcpServer(event_loop);
-    }
-    ESP_LOGE("SRV","Invalid type specified %s",type);
-    return nullptr;
+Controller* start_tcp_controller(esp_event_loop_handle_t event_loop, const evStartTcpControllerParams*)
+{
+    return new TcpController(event_loop,DEFAULT_TCP_PORT);
 }
+

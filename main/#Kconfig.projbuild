@@ -1,0 +1,10 @@
+menu "Anti-Theft-Monitor Configuration"
+
+config GPIO_PIR_1
+    int "GPIO input pin for PIR 1"
+    range ENV_GPIO_RANGE_MIN ENV_GPIO_IN_RANGE_MAX
+    default 0
+    help
+        GPIO pin number to be used by PIR 1 motion detector
+
+endmenu
