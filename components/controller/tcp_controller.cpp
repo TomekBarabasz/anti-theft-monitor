@@ -98,8 +98,8 @@ CLEAN_UP:
 class WifiHelper
 {
     /* FreeRTOS event group to signal when we are connected*/
-    static EventGroupHandle_t s_wifi_event_group;
-    static int s_retry_num;
+    inline static EventGroupHandle_t s_wifi_event_group;
+    inline static int s_retry_num;
     static constexpr int WIFI_CONNECT_MAXIMUM_RETRY = 3;
     static constexpr int WIFI_CHANNEL = 1;
     static constexpr int MAX_STA_CONNECTIONS = 1;
@@ -130,10 +130,10 @@ class WifiHelper
     {
         if (event_id == WIFI_EVENT_AP_STACONNECTED) {
             wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-            ESP_LOGI(TAG, "station %S join, AID=%d", MAC2STR(event->mac), event->aid);
+            ESP_LOGI(TAG, "station " MACSTR " join, AID=%d", MAC2STR(event->mac), event->aid);
         } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
             wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-            ESP_LOGI(TAG, "station %S leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
+            ESP_LOGI(TAG, "station " MACSTR " leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
         }
     }
 
@@ -162,16 +162,16 @@ class WifiHelper
                 * to WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK and set the password with length and format matching to
                 * WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK standards.
                 */
-        config.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK,
+        config.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK;
         //config.sta.sae_pwe_h2e = ESP_WIFI_SAE_MODE,
         //config.sta.sae_h2e_identifier = EXAMPLE_H2E_IDENTIFIER,
         
         //use ram instad of flash ? 
         //ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config) );
-        ESP_ERROR_CHECK(esp_wifi_start() );
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config));
+        ESP_ERROR_CHECK(esp_wifi_start());
 
         ESP_LOGI(TAG, "wifi_init_sta finished.");
 
@@ -208,13 +208,13 @@ class WifiHelper
                                                             &event_handler_ap,
                                                             NULL,
                                                             NULL));
-        config.ap.ssid_len = strlen(static_cast<const char*>(&config.ap.ssid));
+        config.ap.ssid_len = strlen(reinterpret_cast<const char*>(config.ap.ssid));
         config.ap.channel = WIFI_CHANNEL;
         config.ap.max_connection = MAX_STA_CONNECTIONS;
         config.ap.authmode = WIFI_AUTH_WPA2_PSK,
-        config.ap.pmf_cfg = { .required = true };
+        config.ap.pmf_cfg = { true, true };
 
-        if (strlen(static_cast<const char*>(&config.ap.password)) == 0) {
+        if (strlen(reinterpret_cast<const char*>(config.ap.password)) == 0) {
             config.ap.authmode = WIFI_AUTH_OPEN;
         }
 
@@ -257,17 +257,17 @@ public:
 struct TcpController : public Controller
 {
     TcpController(esp_event_loop_handle_t el, const evStartTcpControllerParams& prms) : 
-        event_loop(el),
         port(prms.port),
-        wifi_mode(prms.wifi_mode)
+        wifi_mode(prms.wifi_mode),
+        event_loop(el)
     {
         wifi_config = std::make_unique<wifi_config_t>();
-        if (wifi_mode == evStartTcpControllerParams::WifiMode::STA) {
-            strncp_s(wifi_config->sta.ssid,     prms.ssid,     sizeof(wifi_config.sta.ssid));
-            strncp_s(wifi_config->sta.password, prms.password, sizeof(wifi_config.sta.password));
+        if (wifi_mode == WifiMode::STA) {
+            memcpy(wifi_config->sta.ssid,     prms.ssid,     sizeof(prms.ssid));
+            memcpy(wifi_config->sta.password, prms.password, sizeof(prms.password));
         } else {
-            strncp_s(wifi_config->ap.ssid,     prms.ssid,     sizeof(wifi_config.sta.ssid));
-            strncp_s(wifi_config->ap.password, prms.password, sizeof(wifi_config.sta.password));
+            memcpy(wifi_config->ap.ssid,     prms.ssid,     sizeof(prms.ssid));
+            memcpy(wifi_config->ap.password, prms.password, sizeof(prms.password));
         }        
     }
     bool run() override
