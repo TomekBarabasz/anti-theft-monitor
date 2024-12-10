@@ -51,7 +51,7 @@ struct SprayReleaserImpl : public SprayReleaser
     }
     static void task_main(void *params)
     {
-        auto inst = *static_cast<SprayReleaserImpl*>(params);
+        auto & inst = *static_cast<SprayReleaserImpl*>(params);
         for (;;) 
         {
             uint32_t cmd;

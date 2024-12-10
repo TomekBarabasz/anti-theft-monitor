@@ -53,7 +53,7 @@ struct MotionDetectorImpl : public MotionDetector
     }
     static void task_main(void *params)
     {
-        auto inst = *static_cast<MotionDetectorImpl*>(params);
+        auto & inst = *static_cast<MotionDetectorImpl*>(params);
         gpio_num_t io_num;
         for (;;) 
         {

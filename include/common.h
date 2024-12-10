@@ -18,14 +18,16 @@ enum ServerCommandEvents
     evStartBluetooth
 };
 
+enum class WifiMode : uint8_t {
+    AP,
+    STA
+};
+
 struct evStartTcpControllerParams
 {
     int port;
-    enum WifiMode : uint8_t {
-        AP,
-        STA
-    } wifi_mode;
-    char ssid[64];
+    WifiMode wifi_mode;
+    char ssid[32];
     char password[64];
 };
 
