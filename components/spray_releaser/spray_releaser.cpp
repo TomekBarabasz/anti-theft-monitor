@@ -10,7 +10,7 @@ constexpr int MOTOR_GPIO_LVL_INACTIVE = 1;
 
 #ifdef ENABLE_SPR_TRACE
 static const char* TAG = "SPR";
-#define TRACE(fmt, ...) ESP_LOGI(TAG, fmt, ##__VA_ARGS)
+#define TRACE(fmt, ...) ESP_LOGI(TAG, fmt, ##__VA_ARGS__)
 BLEBLE
 #else
 #define TRACE(fmt, ...)

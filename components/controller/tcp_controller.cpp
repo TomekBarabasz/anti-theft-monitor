@@ -46,7 +46,17 @@
 namespace {
 constexpr int DEFAULT_TCP_PORT = 5555;
 constexpr int DEFAULT_UDP_PORT = 6666;
-const char *TAG = "WIFI";
+
+#define ENABLE_WIFI_TRACE
+#define ENABLE_TCP_TRACE
+
+#ifdef ENABLE_WIFI_TRACE
+#define TRACE_WIFI(fmt, ...) ESP_LOGI("WIFI" , fmt , ##__VA_ARGS__)
+#endif
+
+#ifdef ENABLE_TCP_TRACE
+#define TRACE_TCP(fmt, ...) ESP_LOGI("TCP" , fmt , ##__VA_ARGS__)
+#endif
 
 enum class WifiState {
     DISCONNECTED,
@@ -64,7 +74,7 @@ enum class WifiState {
 
     int listen_sock = socket(AF_INET6, SOCK_STREAM, IPPROTO_IPV6);
     if (listen_sock < 0) {
-        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        ESP_LOGE("TCP", "Unable to create socket: errno %d", errno);
         return -1;
     }
     int opt = 1;
@@ -73,18 +83,18 @@ enum class WifiState {
     opt = 0;
     setsockopt(listen_sock, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt));
 
-    ESP_LOGI(TAG, "Socket created");
+    TRACE_TCP("Socket created");
 
     int err = bind(listen_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     if (err != 0) {
-        ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+        ESP_LOGE("TCP", "Socket unable to bind: errno %d", errno);
         goto CLEAN_UP;
     }
-    ESP_LOGI(TAG, "Socket bound, port %d", port);
+    TRACE_TCP("Socket bound, port %d", port);
 
     err = listen(listen_sock, 1);
     if (err != 0) {
-        ESP_LOGE(TAG, "Error occurred during listen: errno %d", errno);
+        ESP_LOGE("TCP", "Error occurred during listen: errno %d", errno);
         goto CLEAN_UP;
     }
 
@@ -98,9 +108,10 @@ CLEAN_UP:
 class WifiHelper
 {
     /* FreeRTOS event group to signal when we are connected*/
-    inline static EventGroupHandle_t s_wifi_event_group;
+    inline static EventGroupHandle_t s_wifi_event_group {nullptr};
+    inline static esp_netif_t *wifi_netif {nullptr};
     inline static int s_retry_num;
-    static constexpr int WIFI_CONNECT_MAXIMUM_RETRY = 3;
+    static constexpr int WIFI_CONNECT_MAXIMUM_RETRY = 10;
     static constexpr int WIFI_CHANNEL = 1;
     static constexpr int MAX_STA_CONNECTIONS = 1;
 
@@ -113,14 +124,14 @@ class WifiHelper
             if (s_retry_num < WIFI_CONNECT_MAXIMUM_RETRY) {
                 esp_wifi_connect();
                 s_retry_num++;
-                ESP_LOGI(TAG, "retry to connect to the AP");
+                TRACE_WIFI("retry to connect to the AP");
             } else {
                 xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
             }
-            ESP_LOGI(TAG,"connect to the AP fail");
+            TRACE_WIFI("connect to the AP fail");
         } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
             ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-            ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+            TRACE_WIFI("got ip:" IPSTR, IP2STR(&event->ip_info.ip));
             s_retry_num = 0;
             xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         }
@@ -130,17 +141,18 @@ class WifiHelper
     {
         if (event_id == WIFI_EVENT_AP_STACONNECTED) {
             wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-            ESP_LOGI(TAG, "station " MACSTR " join, AID=%d", MAC2STR(event->mac), event->aid);
+            TRACE_WIFI("station " MACSTR " join, AID=%d", MAC2STR(event->mac), event->aid);
         } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
             wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-            ESP_LOGI(TAG, "station " MACSTR " leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
+            TRACE_WIFI("station " MACSTR " leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
         }
     }
 
     static bool init_sta(wifi_config_t & config)
     {
         s_retry_num = 0;
-        esp_netif_create_default_wifi_sta();
+        s_wifi_event_group = xEventGroupCreate();
+        wifi_netif = esp_netif_create_default_wifi_sta();
 
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -163,8 +175,8 @@ class WifiHelper
                 * WIFI_AUTH_WEP/WIFI_AUTH_WPA_PSK standards.
                 */
         config.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK;
-        //config.sta.sae_pwe_h2e = ESP_WIFI_SAE_MODE,
-        //config.sta.sae_h2e_identifier = EXAMPLE_H2E_IDENTIFIER,
+        config.sta.sae_pwe_h2e = WPA3_SAE_PWE_HUNT_AND_PECK;
+        config.sta.sae_h2e_identifier[0] = 0;//EXAMPLE_H2E_IDENTIFIER,
         
         //use ram instad of flash ? 
         //ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
@@ -173,26 +185,28 @@ class WifiHelper
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config));
         ESP_ERROR_CHECK(esp_wifi_start());
 
-        ESP_LOGI(TAG, "wifi_init_sta finished.");
+        TRACE_WIFI("wifi_init_sta finished.");
 
         /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
         * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
+        
         EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
                 WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
                 pdFALSE,
                 pdFALSE,
                 portMAX_DELAY);
-
+        vEventGroupDelete(s_wifi_event_group);
+        s_wifi_event_group = nullptr;
         /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
         * happened. */
         if (bits & WIFI_CONNECTED_BIT) {
-            ESP_LOGI(TAG, "connected to ap SSID:%s", config.sta.ssid);
+            TRACE_WIFI("connected to ap SSID:%s", config.sta.ssid);
             return true;
         } else if (bits & WIFI_FAIL_BIT) {
-            ESP_LOGI(TAG, "Failed to connect to SSID:%s", config.sta.ssid);
+            TRACE_WIFI("Failed to connect to SSID:%s", config.sta.ssid);
             return false;
         } else {
-            ESP_LOGE(TAG, "UNEXPECTED EVENT");
+            TRACE_WIFI("UNEXPECTED EVENT");
             return false;
         }
     }
@@ -222,7 +236,7 @@ class WifiHelper
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &config));
         ESP_ERROR_CHECK(esp_wifi_start());
 
-        ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s channel:%d", config.ap.ssid, WIFI_CHANNEL);
+        TRACE_WIFI("wifi_init_softap finished. SSID:%s channel:%d", config.ap.ssid, WIFI_CHANNEL);
         return true;
     }
 
@@ -251,6 +265,41 @@ public:
         // ESP_ERROR_CHECK(esp_wifi_clear_default_wifi_driver_and_handlers(s_example_sta_netif));
         // esp_netif_destroy(s_example_sta_netif);
         // s_example_sta_netif = NULL;
+        esp_netif_destroy_default_wifi(wifi_netif);
+        wifi_netif = nullptr;
+        ESP_ERROR_CHECK(esp_event_loop_delete_default());
+    }
+};
+
+struct Decoder
+{
+    template <typename T>
+    void encode(void*& data, T v)
+    {
+        T* pv = reinterpret_cast<T*>(data);
+        *pv++ = v;
+        data = pv;
+    }
+
+    template <typename T>
+    T decode(void*& data)
+    {
+        T* pv = reinterpret_cast<T*>(data);
+        T v = *pv++;
+        data = pv;
+        return v;
+    }
+    template <typename T>
+    T decode_safe(void*& data, int& datasize, T value)
+    {
+        if (datasize >= sizeof(T))
+        {
+            T* pv = reinterpret_cast<T*>(data);
+            T v = *pv++;
+            data = pv;
+            datasize -= sizeof(T);
+            return v;
+        }else return value;
     }
 };
 
@@ -291,12 +340,19 @@ struct TcpController : public Controller
     }
     void stop() override
     {
+        TRACE_TCP("TcpController::stop");
         tcp_server_running = false;
-        wifi_state = WifiState::DISCONNECTED;
+        if (wifi_state == WifiState::CONNECTED) {
+            wifi_state = WifiState::DISCONNECTED;
+            shutdown(client_sock, SHUT_RDWR); // Shutdown both send and receive
+            close(listen_sock);
+            client_sock = -1;
+            listen_sock = -1;
+        }
     }
     void release() override
     {
-        stop();
+        TRACE_TCP("TcpController release : byebye");
         delete this;
     }
     void handle_incomming_data(int sock)
@@ -307,9 +363,9 @@ struct TcpController : public Controller
         {
             nbytes = recv(sock, rx_buffer, sizeof(rx_buffer), 0);
             if (nbytes < 0) {
-                ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
+                ESP_LOGE("TCP", "Error occurred during receiving: errno %d", errno);
             } else if (nbytes == 0) {
-                ESP_LOGW(TAG, "Connection closed");
+                ESP_LOGW("TCP", "Connection closed");
             } else 
             {
                 ESP_ERROR_CHECK(esp_event_post_to(event_loop, EXTERNAL_COMMAND_EVENTS, 0, rx_buffer, nbytes, portMAX_DELAY));
@@ -319,31 +375,41 @@ struct TcpController : public Controller
     static void connect_wifi(void *params)
     {
         auto & inst = *static_cast<TcpController*>(params);
+        TRACE_WIFI("connect-wifi-task started");
         const auto res = WifiHelper::init(inst.wifi_mode, *inst.wifi_config);
         if (res) {
             inst.wifi_state = WifiState::CONNECTED;
             inst.run_tcp_server();
             inst.wifi_config.reset();
+        } else {
+            TRACE_WIFI("wifi connection failed doing wifi deinit");
+            WifiHelper::deinit();
+            inst.wifi_state = WifiState::DISCONNECTED;
+            ESP_ERROR_CHECK(esp_event_post_to(inst.event_loop, EXTERNAL_COMMAND_EVENTS, evTcpControllerStopped, nullptr, 0, portMAX_DELAY));
         }
+        TRACE_WIFI("connect-wifi-task exiting");
         vTaskDelete(nullptr);
     }
     static void server_main(void *params)
     {
         auto & inst = *static_cast<TcpController*>(params);
-
+        TRACE_TCP("tcp server task started");
         for(;inst.tcp_server_running;)
         {
-            int sock = connect_tcp_socket(inst.listen_sock);
-            if (sock < 0) continue;
-            inst.handle_incomming_data(sock);
-            shutdown(sock, 0);
-            close(sock);
+            inst.client_sock = connect_tcp_socket(inst.listen_sock);
+            if (inst.client_sock < 0) continue;
+            inst.handle_incomming_data(inst.client_sock);
+            shutdown(inst.client_sock, 0);
+            close(inst.client_sock);
+            inst.client_sock = -1;
         }
 
         close(inst.listen_sock);
         inst.listen_sock = -1;
         WifiHelper::deinit();
-        vTaskDelete(NULL);
+        ESP_ERROR_CHECK(esp_event_post_to(inst.event_loop, EXTERNAL_COMMAND_EVENTS, evTcpControllerStopped, nullptr, 0, portMAX_DELAY));
+        TRACE_TCP("tcp-server task exiting");
+        vTaskDelete(nullptr);
     }
     static int initialize_tcp_socket_ipv4(int port)
     {
@@ -355,23 +421,23 @@ struct TcpController : public Controller
 
         int listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
         if (listen_sock < 0) {
-            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            ESP_LOGE("TCP", "Unable to create socket: errno %d", errno);
             return -1;
         }
         int opt = 1;
         setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-        ESP_LOGI(TAG, "Socket created");
+        TRACE_TCP("Socket created");
 
         int err = bind(listen_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
         if (err != 0) {
-            ESP_LOGE(TAG, "Socket unable to bind AF_INET : errno %d", errno);
+            ESP_LOGE("TCP", "Socket unable to bind AF_INET : errno %d", errno);
             goto CLEAN_UP;
         }
-        ESP_LOGI(TAG, "Socket bound, port %d", port);
+        TRACE_TCP("Socket bound, port %d", port);
 
         err = listen(listen_sock, 1);
         if (err != 0) {
-            ESP_LOGE(TAG, "Error occurred during listen: errno %d", errno);
+            ESP_LOGE("TCP", "Error occurred during listen: errno %d", errno);
             goto CLEAN_UP;
         }
 
@@ -379,7 +445,6 @@ struct TcpController : public Controller
         
     CLEAN_UP:
         close(listen_sock);
-        vTaskDelete(NULL);
         return -1;
     }
     static int connect_tcp_socket(int listen_sock)
@@ -389,13 +454,13 @@ struct TcpController : public Controller
         const int keepInterval = KEEPALIVE_INTERVAL;
         const int keepCount = KEEPALIVE_COUNT;
 
-        ESP_LOGI(TAG, "Socket listening");
+        TRACE_TCP("Socket listening");
 
         struct sockaddr_storage source_addr; // Large enough for both IPv4 or IPv6
         socklen_t addr_len = sizeof(source_addr);
         int sock = accept(listen_sock, (struct sockaddr *)&source_addr, &addr_len);
         if (sock < 0) {
-            ESP_LOGE(TAG, "Unable to accept connection: errno %d", errno);
+            ESP_LOGE("TCP", "Unable to accept connection: errno %d", errno);
             return -1;
         }
 
@@ -414,13 +479,14 @@ struct TcpController : public Controller
             inet6_ntoa_r(((struct sockaddr_in6 *)&source_addr)->sin6_addr, addr_str, sizeof(addr_str) - 1);
         }
 
-        ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
+        TRACE_TCP("Socket accepted ip address: %s", addr_str);
         return sock;
     }
 
     const int port;
     const WifiMode wifi_mode;
     int listen_sock {-1};
+    int client_sock {-1};
     esp_event_loop_handle_t event_loop {nullptr};
     WifiState wifi_state {WifiState::DISCONNECTED};
     std::unique_ptr<wifi_config_t> wifi_config {nullptr};

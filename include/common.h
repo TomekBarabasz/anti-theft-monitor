@@ -15,6 +15,7 @@ enum ServerCommandEvents
     evStartStreaming,
     evPairBluetooth,
     evStartTcpController,
+    evTcpControllerStopped,
     evStartBluetooth
 };
 
@@ -34,6 +35,8 @@ struct evStartTcpControllerParams
 ESP_EVENT_DEFINE_BASE(HARDWARE_BASED_EVENTS);
 enum HardwareBasedEvents 
 {
-    evMotionDetected
+    evMotionDetected,
+    evBtnPressed_1,
+    evBtnReleased_1
 };
 

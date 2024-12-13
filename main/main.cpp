@@ -11,6 +11,12 @@
 #include <motion_detector.h>
 #include <spray_releaser.h>
 #include <common.h>
+#include <string.h>
+#include <chrono>
+#include <credentials.h>
+
+using timestamp_t = std::chrono::time_point<std::chrono::steady_clock>;
+using CLK = std::chrono::steady_clock;
 
 namespace {
 static const char* TAG="MAIN";
@@ -20,7 +26,7 @@ esp_event_loop_handle_t create_main_event_loop()
         .queue_size = 8,
         .task_name = "main_event_loop",
         .task_priority = 5, //uxTaskPriorityGet(NULL),
-        .task_stack_size = 2048,
+        .task_stack_size = 4096,
         .task_core_id = 1
     };
     esp_event_loop_handle_t loop_handle;
@@ -52,6 +58,7 @@ class AntitheftApp
     }
     bool run()
     {
+        hw_ev_tm = CLK::now();
         return sprayReleaser->run() && motd->run() && gprsCtrl->run();
     }
     esp_event_loop_handle_t get_loop_handle() { return main_event_loop; }
@@ -59,6 +66,7 @@ protected:
     static void external_cmds_handler(void* args, esp_event_base_t evBase, int32_t evId, void* evData)
     {
         auto & inst = *reinterpret_cast<AntitheftApp*>(args);
+        ESP_LOGI(TAG, "external cmd  %ld received",evId);
         switch(evId)
         {
             case evAuthenticate:
@@ -73,12 +81,16 @@ protected:
             case evStartStreaming:
             case evPairBluetooth:
             case evStartTcpController:
-                if (inst.tcpCtrl != nullptr) {
-                    inst.tcpCtrl->stop();
-                    inst.tcpCtrl->release();
+                if (nullptr == inst.tcpCtrl) {
+                    inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", evData);
+                    inst.tcpCtrl->run();
                 }
-                inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", evData);
-                inst.tcpCtrl->run();
+                break;
+            case evTcpControllerStopped:
+                if (inst.tcpCtrl != nullptr) {
+                    inst.tcpCtrl->release();
+                    inst.tcpCtrl = nullptr;
+                }
                 break;
             case evStartBluetooth:
             default:;
@@ -87,13 +99,45 @@ protected:
     static void hardware_events_handler(void* args, esp_event_base_t evBase, int32_t evId, void* evData)
     {
         auto & inst = *reinterpret_cast<AntitheftApp*>(args);
-        ESP_LOGI(TAG, "hardware evnent %ld received",evId);
-        switch(evId) 
+        ESP_LOGI(TAG, "hardware event %ld received",evId);
+        auto tm = CLK::now();
+        const std::chrono::duration<float> elapsed_seconds{tm - inst.hw_ev_tm};
+        if (elapsed_seconds.count() > 1.0f) 
         {
-        case evMotionDetected:
-            inst.sprayReleaser->activate();
-            break;
+            switch(evId) 
+            {
+            case evMotionDetected:
+                //inst.sprayReleaser->activate();
+                if (nullptr == inst.tcpCtrl) {
+                    evStartTcpControllerParams prms;
+                    prms.port = 1234;
+                    prms.wifi_mode = WifiMode::STA;
+                    strncpy(prms.ssid,      STA_SSID, sizeof(prms.ssid));
+                    strncpy(prms.password,  STA_PASSW,   sizeof(prms.password));
+                    inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", &prms);
+                    inst.tcpCtrl->run();
+                } else {
+                    inst.tcpCtrl->stop();
+                }
+                break;
+            case evBtnPressed_1:
+                if (nullptr == inst.tcpCtrl) {
+                    evStartTcpControllerParams prms;
+                    prms.port = 1234;
+                    prms.wifi_mode = WifiMode::AP;
+                    strncpy(prms.ssid,      AP_SSID, sizeof(prms.ssid));
+                    strncpy(prms.password,  AP_PASSW,     sizeof(prms.password));
+                    inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", &prms);
+                    inst.tcpCtrl->run();
+                } else {
+                    inst.tcpCtrl->stop();
+                }
+                break;
+            }
+        } else {
+            ESP_LOGI(TAG,"ignoring event due to debouncing dt %f",elapsed_seconds.count());
         }
+        inst.hw_ev_tm = tm;
     }
     esp_event_loop_handle_t main_event_loop {nullptr};
     MotionDetector *motd {nullptr};
@@ -101,6 +145,7 @@ protected:
     Controller *gprsCtrl {nullptr};
     Controller *tcpCtrl {nullptr};
     Controller *bluetoothCtrl {nullptr};
+    timestamp_t hw_ev_tm;
 };
 }
 
