@@ -19,7 +19,12 @@ constexpr uint64_t input_pin_mask(std::initializer_list<gpio_num_t> inputs)
     }
     return mask;
 }
-static const char *TAG = "MOTD";
+#define ENABLE_MOTD_TRACE
+
+#ifdef ENABLE_MOTD_TRACE
+#define TRACE(fmt, ...) ESP_LOGI("MOTD" , fmt , ##__VA_ARGS__)
+#endif
+
 QueueHandle_t gpio_evt_queue {nullptr};
 
 void IRAM_ATTR gpio_isr_handler(void* arg)
@@ -44,13 +49,16 @@ struct MotionDetectorImpl : public MotionDetector
         gpio_config(&io_conf);
 
         //install gpio isr service
-        gpio_install_isr_service(0);    //ESP_INTR_FLAG_DEFAULT
+        constexpr int ESP_INTR_FLAG_DEFAULT = 0;
+        gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     }
     bool run() override
     {
         xTaskCreate(task_main, "motion_detector_task", 1024, this, 10, &task_handle);
+        
         //hook isr handler for specific gpio pin
         gpio_isr_handler_add(GPIO_INPUT_PIR_1, gpio_isr_handler, (void*) GPIO_INPUT_PIR_1);
+        gpio_isr_handler_add(GPIO_INPUT_PIR_2, gpio_isr_handler, (void*) GPIO_INPUT_PIR_2);
         return true;
     }
     void stop() override
@@ -68,7 +76,7 @@ struct MotionDetectorImpl : public MotionDetector
             if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) 
             {
                 auto lvl = gpio_get_level(io_num);
-                ESP_LOGI(TAG, "got event from gpio %d isr lvl=%d",io_num,lvl);
+                TRACE("got event from gpio %d isr lvl=%d",io_num,lvl);
                 HardwareBasedEvents ev;
                 if (0 == lvl) 
                 {
