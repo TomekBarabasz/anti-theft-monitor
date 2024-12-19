@@ -271,8 +271,44 @@ public:
     }
 };
 
-struct Decoder
+class CmdDecoder
 {
+    public:
+    // returns cmd_id, cmd_data_length
+    // cmd_data_length > 0 [at least 1] if correct command received
+    static constexpr int CmdDataLengths[] = {
+        /*evAuthenticate*/          0,
+        /*evDisarmSprayReleaser*/   0,
+        /*evArmSprayReleaser*/      0,
+        /*evFlashOn*/               0,
+        /*evFlashOff*/              0,
+        /*evFlashBlink*/            0,
+        /*evStartVoiceCall*/        0,
+        /*evEndVoiceCall*/          0,
+        /*evCapturePhoto*/          0,
+        /*evStartAudioStreaming*/   0,
+        /*evStartVideoStreaming*/   0,
+        /*evPairBluetooth*/         0,
+        /*evStartTcpController*/    sizeof(CmdStartTcpController),
+        /*evStopTcpController*/     0,
+        /*evStartBluetooth*/        0,
+        /*evStartUpdMonitor*/       sizeof(CmdStartUdpMonitor),
+        /*evStopUpdMonitor*/        0,
+        /*evEcho*/                  
+    };
+    static std::pair<int,int> decode(uint8_t* buffer, int length)
+    {
+        uint8_t msg_id = *buffer++;
+        --length;
+        if (msg_id > evEcho) {
+            return {0,-1};
+        }
+        const auto cmd_prm_len = CmdDataLengths[msg_id];
+        if (length >= cmd_prm_len) {
+            return {msg_id, cmd_prm_len};
+        }
+        else return {0,-1};
+    }
     template <typename T>
     void encode(void*& data, T v)
     {
@@ -280,7 +316,6 @@ struct Decoder
         *pv++ = v;
         data = pv;
     }
-
     template <typename T>
     T decode(void*& data)
     {
@@ -305,7 +340,7 @@ struct Decoder
 
 struct TcpController : public Controller
 {
-    TcpController(esp_event_loop_handle_t el, const evStartTcpControllerParams& prms) : 
+    TcpController(esp_event_loop_handle_t el, const CmdStartTcpController& prms) : 
         port(prms.port),
         wifi_mode(prms.wifi_mode),
         event_loop(el)
@@ -357,7 +392,9 @@ struct TcpController : public Controller
     }
     void handle_incomming_data(int sock)
     {
-        uint8_t rx_buffer[512];
+        constexpr size_t rx_buffer_size = 512;
+        uint8_t rx_buffer[rx_buffer_size];
+
         int nbytes;
         do
         {
@@ -368,7 +405,19 @@ struct TcpController : public Controller
                 ESP_LOGW("TCP", "Connection closed");
             } else 
             {
+            #if 1
+                auto [cmd_id, cmd_prms_len] = CmdDecoder::decode(rx_buffer, nbytes);
+                if (cmd_prms_len >= 0) {
+                    ESP_ERROR_CHECK(esp_event_post_to(event_loop, EXTERNAL_COMMAND_EVENTS, cmd_id, rx_buffer+1, cmd_prms_len, portMAX_DELAY));
+                } else {
+
+                }
+            #else
+                pnext += nbytes;
+                const size_t data_length = pnext - rx_buffer;
+                auto [done, cmd] = CmdDecoder::tryDecode(rx_buffer, data_length);
                 ESP_ERROR_CHECK(esp_event_post_to(event_loop, EXTERNAL_COMMAND_EVENTS, 0, rx_buffer, nbytes, portMAX_DELAY));
+            #endif
             }
         } while(nbytes > 0 && tcp_server_running);
     }
@@ -494,7 +543,7 @@ struct TcpController : public Controller
 };
 }
 
-Controller* start_tcp_controller(esp_event_loop_handle_t event_loop, const evStartTcpControllerParams& prms)
+Controller* start_tcp_controller(esp_event_loop_handle_t event_loop, const CmdStartTcpController& prms)
 {
     return new TcpController(event_loop,prms);
 }

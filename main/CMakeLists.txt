@@ -8,8 +8,10 @@ INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/components/motion_detector
     ${CMAKE_SOURCE_DIR}/components/controller
     ${CMAKE_SOURCE_DIR}/components/spray_releaser
+    ${CMAKE_SOURCE_DIR}/components/event_monitor
 
 REQUIRES
     esp_netif
     nvs_flash
+    driver
 )

@@ -7,10 +7,15 @@
 #include "esp_event.h"
 #include "esp_log.h"
 
+//for keepalive task
+#include "driver/gpio.h"
+
+#include <common.h>
 #include <controller.h>
 #include <motion_detector.h>
 #include <spray_releaser.h>
-#include <common.h>
+#include <event_monitor.h>
+
 #include <string.h>
 #include <chrono>
 #include <credentials.h>
@@ -78,8 +83,10 @@ protected:
             case evStartVoiceCall:
             case evEndVoiceCall:
             case evCapturePhoto:
-            case evStartStreaming:
+            case evStartAudioStreaming:
+            case evStartVideoStreaming:
             case evPairBluetooth:
+                break;
             case evStartTcpController:
                 if (nullptr == inst.tcpCtrl) {
                     inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", evData);
@@ -93,6 +100,28 @@ protected:
                 }
                 break;
             case evStartBluetooth:
+                break;
+            case evStartUpdMonitor:{
+                auto & prms = *reinterpret_cast<const CmdStartUdpMonitor*>(evData);
+                ESP_LOGI(TAG,"evStartUpdMonitor received ip %d.%d.%d.%d port %d",
+                    prms.ip[0],prms.ip[1],prms.ip[2],prms.ip[3],prms.port);
+                if (nullptr == inst.evMon){
+                    inst.evMon = EventMonitor::create_instance("udp",evData);
+                }
+                break;}
+            case evStopUpdMonitor:
+                if (inst.evMon != nullptr) {
+                    inst.evMon->release();
+                    inst.evMon = nullptr;
+                }
+                break;
+            case evEcho:
+                if (inst.evMon != nullptr) {
+                    auto & prms = *reinterpret_cast<const CmdEcho*>(evData);
+                    std::string message(prms.message,prms.n_chars);
+                    inst.evMon->send(EventMonitor::Severity::debug, std::move(message));
+                }
+                break;
             default:;
         }
     }
@@ -109,7 +138,7 @@ protected:
             case evMotionDetected:
                 //inst.sprayReleaser->activate();
                 if (nullptr == inst.tcpCtrl) {
-                    evStartTcpControllerParams prms;
+                    CmdStartTcpController prms;
                     prms.port = 1234;
                     prms.wifi_mode = WifiMode::STA;
                     strncpy(prms.ssid,      STA_SSID, sizeof(prms.ssid));
@@ -122,7 +151,7 @@ protected:
                 break;
             case evBtnPressed_1:
                 if (nullptr == inst.tcpCtrl) {
-                    evStartTcpControllerParams prms;
+                    CmdStartTcpController prms;
                     prms.port = 1234;
                     prms.wifi_mode = WifiMode::AP;
                     strncpy(prms.ssid,      AP_SSID, sizeof(prms.ssid));
@@ -145,12 +174,28 @@ protected:
     Controller *gprsCtrl {nullptr};
     Controller *tcpCtrl {nullptr};
     Controller *bluetoothCtrl {nullptr};
+    EventMonitor *evMon {nullptr};
     timestamp_t hw_ev_tm;
 };
 }
 
 AntitheftApp *app {nullptr};
 
+
+ void keep_alive_task(void*)
+{
+    constexpr auto BLINK_GPIO = static_cast<gpio_num_t>(2);
+    constexpr TickType_t CONFIG_BLINK_PERIOD = 1000;
+    gpio_reset_pin(BLINK_GPIO);
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    
+    uint8_t s_led_state = 0;
+    for(;;) {
+        gpio_set_level(BLINK_GPIO, s_led_state);
+        s_led_state = !s_led_state;
+        vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
+    }
+}
 
 extern "C" void app_main()
 {
@@ -163,4 +208,6 @@ extern "C" void app_main()
     
     app = new AntitheftApp();
     app->run();
+
+    xTaskCreate(keep_alive_task, "keep_alive_task", 2048, nullptr, 10, nullptr);
 }

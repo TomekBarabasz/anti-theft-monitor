@@ -4,7 +4,7 @@
 #include <common.h>
 #include <controller.h>
 
-extern Controller* start_tcp_controller(esp_event_loop_handle_t event_loop, const evStartTcpControllerParams&);
+extern Controller* start_tcp_controller(esp_event_loop_handle_t event_loop, const CmdStartTcpController&);
 extern Controller* start_gprs_controller(esp_event_loop_handle_t event_loop);
 //extern Controller* start_bluetooth_controller(esp_event_loop_handle_t event_loop);
 
@@ -14,7 +14,7 @@ Controller* Controller::create_instance(esp_event_loop_handle_t event_loop,const
         return start_gprs_controller(event_loop);
     }
     else if (0 == strcmp(type,"tcp")) {
-        auto * params = reinterpret_cast<const evStartTcpControllerParams*>(params_);
+        auto * params = reinterpret_cast<const CmdStartTcpController*>(params_);
         return start_tcp_controller(event_loop, *params);
     }
     /*else if (0 == strcmp(type,"bluetooth")) {

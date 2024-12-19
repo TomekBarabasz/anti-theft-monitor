@@ -12,11 +12,17 @@ enum ServerCommandEvents
     evStartVoiceCall,
     evEndVoiceCall,
     evCapturePhoto,
-    evStartStreaming,
+    evStartAudioStreaming,
+    evStartVideoStreaming,
     evPairBluetooth,
     evStartTcpController,
-    evTcpControllerStopped,
-    evStartBluetooth
+    evStopTcpController,
+    evStartBluetooth,
+    evStartUpdMonitor,
+    evStopUpdMonitor,
+    evEcho,
+    
+    evTcpControllerStopped
 };
 
 enum class WifiMode : uint8_t {
@@ -24,19 +30,27 @@ enum class WifiMode : uint8_t {
     STA
 };
 
-struct evStartTcpControllerParams
-{
-    int port;
+struct CmdStartUdpMonitor {
+    uint8_t ip[4];
+    uint16_t port;
+};
+
+struct CmdStartTcpController {
+    uint16_t port;
     WifiMode wifi_mode;
     char ssid[32];
     char password[64];
 };
 
+struct CmdEcho {
+    uint16_t n_chars;
+    char message[];
+};
+
 ESP_EVENT_DEFINE_BASE(HARDWARE_BASED_EVENTS);
-enum HardwareBasedEvents 
+enum HardwareBasedEvents : uint8_t 
 {
     evMotionDetected,
     evBtnPressed_1,
     evBtnReleased_1
 };
-
