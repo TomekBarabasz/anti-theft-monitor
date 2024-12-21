@@ -44,7 +44,7 @@ struct CmdStartTcpController {
 
 struct CmdEcho {
     uint16_t n_chars;
-    char message[];
+    char message[1];
 };
 
 ESP_EVENT_DEFINE_BASE(HARDWARE_BASED_EVENTS);

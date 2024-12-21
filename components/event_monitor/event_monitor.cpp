@@ -40,7 +40,8 @@ struct UdpEventMonitor : public EventMonitor
     }
     bool send(EventMonitor::Severity s, std::string&& event) override
     {
-        if (sendto(sockfd, event.c_str(), event.size(), 0, (const struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
+        if (sendto( sockfd, event.c_str(), event.size(), 0, 
+                    (const struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
             ESP_LOGE(TAG, "sendto failed %s", strerror(errno));
             return false;
         } else {
@@ -60,7 +61,7 @@ struct UdpEventMonitor : public EventMonitor
 
 EventMonitor* EventMonitor::create_instance(const char* type, void *prms_)
 {
-    if (0 == strcmp(type,"ucp")) {
+    if (0 == strcmp(type,"udp")) {
         auto & prms = *reinterpret_cast<const CmdStartUdpMonitor*>(prms_);
         monitor_instance = new UdpEventMonitor(prms);
         return monitor_instance;

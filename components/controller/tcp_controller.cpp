@@ -294,7 +294,7 @@ class CmdDecoder
         /*evStartBluetooth*/        0,
         /*evStartUpdMonitor*/       sizeof(CmdStartUdpMonitor),
         /*evStopUpdMonitor*/        0,
-        /*evEcho*/                  
+        /*evEcho*/                  sizeof(CmdEcho),
     };
     static std::pair<int,int> decode(uint8_t* buffer, int length)
     {
@@ -302,6 +302,13 @@ class CmdDecoder
         --length;
         if (msg_id > evEcho) {
             return {0,-1};
+        }
+        // special handlng for echo command
+        if (msg_id == evEcho) {
+            if (length > sizeof(CmdEcho)) {
+                return {msg_id, length};
+            } else { return {0,-1};
+            }
         }
         const auto cmd_prm_len = CmdDataLengths[msg_id];
         if (length >= cmd_prm_len) {
