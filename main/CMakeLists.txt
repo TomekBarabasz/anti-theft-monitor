@@ -14,4 +14,5 @@ REQUIRES
     esp_netif
     nvs_flash
     driver
+    fmt
 )

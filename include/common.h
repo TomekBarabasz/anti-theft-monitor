@@ -21,8 +21,10 @@ enum ServerCommandEvents
     evStartUpdMonitor,
     evStopUpdMonitor,
     evEcho,
+    evStartGprsController,
     
-    evTcpControllerStopped
+    evTcpControllerStopped,
+    evGprsControllerStopped
 };
 
 enum class WifiMode : uint8_t {

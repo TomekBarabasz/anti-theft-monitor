@@ -38,15 +38,15 @@ struct UdpEventMonitor : public EventMonitor
             sockfd = -1;
         }
     }
-    bool send(EventMonitor::Severity s, std::string&& event) override
+    bool send(EventMonitor::Severity s, const char* tag, std::string&& event) override
     {
-        if (sendto( sockfd, event.c_str(), event.size(), 0, 
+        auto msg = fmt::format("{}:{}",tag,event);
+        if (sendto( sockfd, msg.c_str(), msg.size(), 0, 
                     (const struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
             ESP_LOGE(TAG, "sendto failed %s", strerror(errno));
             return false;
-        } else {
-            return true;
         }
+        return true;
     }
     void release() override 
     {
@@ -59,11 +59,35 @@ struct UdpEventMonitor : public EventMonitor
     struct sockaddr_in dest_addr;
 };
 
+struct SerialEventMonitor : public EventMonitor
+{
+    bool send(EventMonitor::Severity s, const char* tag, std::string&& event) override
+    {
+        switch (s) {
+            case Severity::debug:
+            case Severity::info:
+                ESP_LOGI(tag, "%s", event.c_str());
+                break;
+            case Severity::error:
+                ESP_LOGE(tag, "%s", event.c_str());
+                break;
+        }
+        return true;
+    }
+    void release() override
+    {
+        delete this;
+    }
+};
+
 EventMonitor* EventMonitor::create_instance(const char* type, void *prms_)
 {
     if (0 == strcmp(type,"udp")) {
         auto & prms = *reinterpret_cast<const CmdStartUdpMonitor*>(prms_);
         monitor_instance = new UdpEventMonitor(prms);
+        return monitor_instance;
+    } else if (0 == strcmp(type,"serial")) {
+        monitor_instance = new SerialEventMonitor();
         return monitor_instance;
     } else {
         return nullptr;

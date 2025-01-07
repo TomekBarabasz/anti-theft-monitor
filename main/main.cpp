@@ -15,7 +15,7 @@
 #include <motion_detector.h>
 #include <spray_releaser.h>
 #include <event_monitor.h>
-
+#include <fmt/core.h>
 #include <string.h>
 #include <chrono>
 #include <credentials.h>
@@ -23,8 +23,16 @@
 using timestamp_t = std::chrono::time_point<std::chrono::steady_clock>;
 using CLK = std::chrono::steady_clock;
 
+#define ENABLE_MAIN_TRACE
+#ifdef ENABLE_MAIN_TRACE
+ #define LOG_E(fmts,...) _LOG_E_("MAIN",fmts,##__VA_ARGS__)
+ #define LOG_I(fmts,...) _LOG_I_("MAIN",fmts,##__VA_ARGS__)
+#else
+ #define LOG_E(fmts,...) 
+ #define LOG_I(fmts,...) 
+#endif
+
 namespace {
-static const char* TAG="MAIN";
 esp_event_loop_handle_t create_main_event_loop()
 {
     esp_event_loop_args_t loop_args = {
@@ -71,7 +79,7 @@ protected:
     static void external_cmds_handler(void* args, esp_event_base_t evBase, int32_t evId, void* evData)
     {
         auto & inst = *reinterpret_cast<AntitheftApp*>(args);
-        ESP_LOGI(TAG, "external cmd  %ld received",evId);
+        LOG_I("external cmd {} received",evId);
         switch(evId)
         {
             case evAuthenticate:
@@ -102,33 +110,41 @@ protected:
             case evStartBluetooth:
                 break;
             case evStartUpdMonitor:{
-                auto & prms = *reinterpret_cast<const CmdStartUdpMonitor*>(evData);
-                ESP_LOGI(TAG,"evStartUpdMonitor received ip %d.%d.%d.%d port %d",
-                    prms.ip[0],prms.ip[1],prms.ip[2],prms.ip[3],prms.port);
-                if (nullptr == inst.evMon){
-                    inst.evMon = EventMonitor::create_instance("udp",evData);
+                if (auto *pem = EventMonitor::get_instance(); pem != nullptr) {
+                    pem->release();
                 }
+                auto & prms = *reinterpret_cast<const CmdStartUdpMonitor*>(evData);
+                LOG_I("evStartUpdMonitor received ip {}.{}.{}.{} port {}",
+                    prms.ip[0],prms.ip[1],prms.ip[2],prms.ip[3],prms.port);
+                EventMonitor::create_instance("udp",evData);
                 break;}
             case evStopUpdMonitor:
-                if (inst.evMon != nullptr) {
-                    inst.evMon->release();
-                    inst.evMon = nullptr;
+                if (auto *pem = EventMonitor::get_instance(); pem != nullptr) {
+                    pem->release();
                 }
+                EventMonitor::create_instance("serial");
                 break;
-            case evEcho:
-                if (inst.evMon != nullptr) {
-                    auto & prms = *reinterpret_cast<const CmdEcho*>(evData);
-                    std::string message(prms.message,prms.n_chars);
-                    inst.evMon->send(EventMonitor::Severity::debug, std::move(message));
+            case evEcho:{
+                auto & prms = *reinterpret_cast<const CmdEcho*>(evData);
+                std::string message(prms.message,prms.n_chars);
+                EventMonitor::get_instance()->send(EventMonitor::Severity::debug, "ECHO",std::move(message));
+                break;}
+            case evStartGprsController:
+                if (nullptr == inst.gprsCtrl) {
+                    inst.gprsCtrl = Controller::create_instance(inst.main_event_loop,"gprs", evData);
+                    if (!inst.gprsCtrl->run()) {
+                        inst.gprsCtrl->release();
+                        inst.gprsCtrl = nullptr;
+                        LOG_E("GprsController run failed");
+                    }
                 }
-                break;
             default:;
         }
     }
     static void hardware_events_handler(void* args, esp_event_base_t evBase, int32_t evId, void* evData)
     {
         auto & inst = *reinterpret_cast<AntitheftApp*>(args);
-        ESP_LOGI(TAG, "hardware event %ld received",evId);
+        LOG_I("hardware event {} received",evId);
         auto tm = CLK::now();
         const std::chrono::duration<float> elapsed_seconds{tm - inst.hw_ev_tm};
         if (elapsed_seconds.count() > 1.0f) 
@@ -164,7 +180,7 @@ protected:
                 break;
             }
         } else {
-            ESP_LOGI(TAG,"ignoring event due to debouncing dt %f",elapsed_seconds.count());
+            LOG_I("ignoring event due to debouncing dt {}",elapsed_seconds.count());
         }
         inst.hw_ev_tm = tm;
     }
@@ -174,15 +190,13 @@ protected:
     Controller *gprsCtrl {nullptr};
     Controller *tcpCtrl {nullptr};
     Controller *bluetoothCtrl {nullptr};
-    EventMonitor *evMon {nullptr};
     timestamp_t hw_ev_tm;
 };
 }
 
 AntitheftApp *app {nullptr};
 
-
- void keep_alive_task(void*)
+/*void keep_alive_task(void*)
 {
     constexpr auto BLINK_GPIO = static_cast<gpio_num_t>(2);
     constexpr TickType_t CONFIG_BLINK_PERIOD = 1000;
@@ -195,7 +209,7 @@ AntitheftApp *app {nullptr};
         s_led_state = !s_led_state;
         vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
     }
-}
+}*/
 
 extern "C" void app_main()
 {
@@ -207,7 +221,8 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(ret);
     
     app = new AntitheftApp();
+    EventMonitor::create_instance("serial");
     app->run();
 
-    xTaskCreate(keep_alive_task, "keep_alive_task", 2048, nullptr, 10, nullptr);
+    //xTaskCreate(keep_alive_task, "keep_alive_task", 2048, nullptr, 10, nullptr);
 }

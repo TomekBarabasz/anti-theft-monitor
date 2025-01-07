@@ -3,6 +3,7 @@ import socket,argparse,struct,threading,sys
 CMD_START_UDP_MONITOR = 15
 CMD_STOP_UDP_MONITOR  = 16
 CMD_ECHO = 17
+CMD_START_GPSR_CONTROLLER = 18
 
 def set_keepalive(sock):
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)

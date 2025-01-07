@@ -6,6 +6,8 @@
 #include <common.h>
 #include <initializer_list>
 #include <motion_detector.h>
+#include <event_monitor.h>
+#include <fmt/core.h>
 
 namespace {
 //to be configured via project menu config GPIO_PIR_1
@@ -22,7 +24,9 @@ constexpr uint64_t input_pin_mask(std::initializer_list<gpio_num_t> inputs)
 #define ENABLE_MOTD_TRACE
 
 #ifdef ENABLE_MOTD_TRACE
-#define TRACE(fmt, ...) ESP_LOGI("MOTD" , fmt , ##__VA_ARGS__)
+  #define LOG_I(fmts,...) _LOG_I_("MOTD", fmts, ##__VA_ARGS__)
+#else
+ #define LOG_I(fmts,...)
 #endif
 
 QueueHandle_t gpio_evt_queue {nullptr};
@@ -76,7 +80,7 @@ struct MotionDetectorImpl : public MotionDetector
             if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) 
             {
                 auto lvl = gpio_get_level(io_num);
-                TRACE("got event from gpio %d isr lvl=%d",io_num,lvl);
+                LOG_I("got event from gpio {} isr lvl {}",(int)io_num,(int)lvl);
                 HardwareBasedEvents ev;
                 if (0 == lvl) 
                 {
