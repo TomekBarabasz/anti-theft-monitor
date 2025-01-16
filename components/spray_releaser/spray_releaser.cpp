@@ -1,7 +1,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include <spray_releaser.h>
-#include <common.h>
+#include <events.h>
 
 constexpr auto MOTOR_GPIO = static_cast<gpio_num_t>(33); //INTERNAL RED LED
 constexpr int MOTOR_ACTIVE_PERIOD_MS = 3000;
@@ -69,10 +69,6 @@ struct SprayReleaserImpl : public SprayReleaser
             }
         }
         vTaskDelete(nullptr);
-    }
-    void release()
-    {
-        delete this;
     }
     QueueHandle_t evt_queue {nullptr};
     TaskHandle_t task_handle {nullptr};

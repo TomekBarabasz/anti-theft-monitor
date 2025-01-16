@@ -3,11 +3,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
-#include <common.h>
+#include <events.h>
 #include <initializer_list>
 #include <motion_detector.h>
 #include <event_monitor.h>
-#include <fmt/core.h>
 
 namespace {
 //to be configured via project menu config GPIO_PIR_1
@@ -21,7 +20,7 @@ constexpr uint64_t input_pin_mask(std::initializer_list<gpio_num_t> inputs)
     }
     return mask;
 }
-#define ENABLE_MOTD_TRACE
+//#define ENABLE_MOTD_TRACE
 
 #ifdef ENABLE_MOTD_TRACE
   #define LOG_I(fmts,...) _LOG_I_("MOTD", fmts, ##__VA_ARGS__)
@@ -56,7 +55,7 @@ struct MotionDetectorImpl : public MotionDetector
         constexpr int ESP_INTR_FLAG_DEFAULT = 0;
         gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     }
-    bool run() override
+    bool start() override
     {
         xTaskCreate(task_main, "motion_detector_task", 1024, this, 10, &task_handle);
         
@@ -97,18 +96,21 @@ struct MotionDetectorImpl : public MotionDetector
             }
         }
     }
-    void release()
+    ~MotionDetectorImpl()
     {
         if (task_handle) {
             stop();
         }
-        delete this;
     }
     TaskHandle_t task_handle {nullptr};
     esp_event_loop_handle_t event_loop {nullptr};
 };
 
-MotionDetector* MotionDetector::create_instance(esp_event_loop_handle_t event_loop,const char* type)
+MotionDetector* MotionDetector::create_instance(esp_event_loop_handle_t event_loop)
 {
     return new MotionDetectorImpl(event_loop);
+}
+void MotionDetector::delete_instance(MotionDetector*inst)
+{
+    delete inst;
 }

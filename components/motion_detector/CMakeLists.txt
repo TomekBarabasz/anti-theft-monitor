@@ -8,5 +8,4 @@ REQUIRES
     esp_event
     driver
     event_monitor
-    fmt
 )

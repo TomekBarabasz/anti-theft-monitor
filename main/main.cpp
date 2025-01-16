@@ -1,36 +1,19 @@
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_system.h"
-#include "esp_netif.h"
-#include "nvs_flash.h"
-#include "esp_event.h"
-#include "esp_log.h"
-
-//for keepalive task
-#include "driver/gpio.h"
-
-#include <common.h>
+#include <event_monitor.h>
 #include <controller.h>
+#include <chrono>
+#include <string.h>
+#include "nvs_flash.h"
+#include <credentials.h>
+#include <events.h>
+#include <commands.h>
 #include <motion_detector.h>
 #include <spray_releaser.h>
-#include <event_monitor.h>
-#include <fmt/core.h>
-#include <string.h>
-#include <chrono>
-#include <credentials.h>
 
 using timestamp_t = std::chrono::time_point<std::chrono::steady_clock>;
 using CLK = std::chrono::steady_clock;
 
-#define ENABLE_MAIN_TRACE
-#ifdef ENABLE_MAIN_TRACE
- #define LOG_E(fmts,...) _LOG_E_("MAIN",fmts,##__VA_ARGS__)
- #define LOG_I(fmts,...) _LOG_I_("MAIN",fmts,##__VA_ARGS__)
-#else
- #define LOG_E(fmts,...) 
- #define LOG_I(fmts,...) 
-#endif
+#define LOG_I(fmt,...)
+#define LOG_E(fmt,...)
 
 namespace {
 esp_event_loop_handle_t create_main_event_loop()
@@ -57,7 +40,7 @@ class AntitheftApp
 
         sprayReleaser = SprayReleaser::create_instance();
         motd = MotionDetector::create_instance(main_event_loop);
-        gprsCtrl = Controller::create_instance(main_event_loop,"gprs");
+        gprsCtrl = create_gprs_controller(main_event_loop);
     }
     ~AntitheftApp()
     {
@@ -65,14 +48,17 @@ class AntitheftApp
         sprayReleaser->stop();
         gprsCtrl->stop();
         
-        motd->release();
-        sprayReleaser->release();
-        gprsCtrl->release();
+        MotionDetector::delete_instance(motd);
+        SprayReleaser::delete_instance(sprayReleaser);
+        Controller::delete_instance(gprsCtrl);
+        motd = nullptr;
+        sprayReleaser =  nullptr;
+        gprsCtrl = nullptr;
     }
     bool run()
     {
         hw_ev_tm = CLK::now();
-        return sprayReleaser->run() && motd->run() && gprsCtrl->run();
+        return sprayReleaser->run() && motd->start() && gprsCtrl->start();
     }
     esp_event_loop_handle_t get_loop_handle() { return main_event_loop; }
 protected:
@@ -97,43 +83,36 @@ protected:
                 break;
             case evStartTcpController:
                 if (nullptr == inst.tcpCtrl) {
-                    inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", evData);
-                    inst.tcpCtrl->run();
+                    inst.tcpCtrl = create_tcp_controller(inst.main_event_loop, *(CmdStartTcpController*)evData);
+                    inst.tcpCtrl->start();
                 }
                 break;
             case evTcpControllerStopped:
                 if (inst.tcpCtrl != nullptr) {
-                    inst.tcpCtrl->release();
+                    Controller::delete_instance(inst.tcpCtrl);
                     inst.tcpCtrl = nullptr;
                 }
                 break;
             case evStartBluetooth:
                 break;
             case evStartUpdMonitor:{
-                if (auto *pem = EventMonitor::get_instance(); pem != nullptr) {
-                    pem->release();
-                }
                 auto & prms = *reinterpret_cast<const CmdStartUdpMonitor*>(evData);
                 LOG_I("evStartUpdMonitor received ip {}.{}.{}.{} port {}",
                     prms.ip[0],prms.ip[1],prms.ip[2],prms.ip[3],prms.port);
-                EventMonitor::create_instance("udp",evData);
+                EventMonitor::create_udp(prms);
                 break;}
             case evStopUpdMonitor:
-                if (auto *pem = EventMonitor::get_instance(); pem != nullptr) {
-                    pem->release();
-                }
-                EventMonitor::create_instance("serial");
+                EventMonitor::create_serial();
                 break;
             case evEcho:{
                 auto & prms = *reinterpret_cast<const CmdEcho*>(evData);
-                std::string message(prms.message,prms.n_chars);
-                EventMonitor::get_instance()->send(EventMonitor::Severity::debug, "ECHO",std::move(message));
+                EventMonitor::get_instance()->send(prms.message, prms.n_chars);
                 break;}
             case evStartGprsController:
                 if (nullptr == inst.gprsCtrl) {
-                    inst.gprsCtrl = Controller::create_instance(inst.main_event_loop,"gprs", evData);
-                    if (!inst.gprsCtrl->run()) {
-                        inst.gprsCtrl->release();
+                    inst.gprsCtrl = create_gprs_controller(inst.main_event_loop);
+                    if (!inst.gprsCtrl->start()) {
+                        Controller::delete_instance(inst.gprsCtrl);
                         inst.gprsCtrl = nullptr;
                         LOG_E("GprsController run failed");
                     }
@@ -159,8 +138,8 @@ protected:
                     prms.wifi_mode = WifiMode::STA;
                     strncpy(prms.ssid,      STA_SSID, sizeof(prms.ssid));
                     strncpy(prms.password,  STA_PASSW,   sizeof(prms.password));
-                    inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", &prms);
-                    inst.tcpCtrl->run();
+                    inst.tcpCtrl = create_tcp_controller(inst.main_event_loop, prms);
+                    inst.tcpCtrl->start();
                 } else {
                     inst.tcpCtrl->stop();
                 }
@@ -172,8 +151,8 @@ protected:
                     prms.wifi_mode = WifiMode::AP;
                     strncpy(prms.ssid,      AP_SSID, sizeof(prms.ssid));
                     strncpy(prms.password,  AP_PASSW,     sizeof(prms.password));
-                    inst.tcpCtrl = Controller::create_instance(inst.main_event_loop, "tcp", &prms);
-                    inst.tcpCtrl->run();
+                    inst.tcpCtrl = create_tcp_controller(inst.main_event_loop, prms);
+                    inst.tcpCtrl->start();
                 } else {
                     inst.tcpCtrl->stop();
                 }
@@ -196,21 +175,6 @@ protected:
 
 AntitheftApp *app {nullptr};
 
-/*void keep_alive_task(void*)
-{
-    constexpr auto BLINK_GPIO = static_cast<gpio_num_t>(2);
-    constexpr TickType_t CONFIG_BLINK_PERIOD = 1000;
-    gpio_reset_pin(BLINK_GPIO);
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-    
-    uint8_t s_led_state = 0;
-    for(;;) {
-        gpio_set_level(BLINK_GPIO, s_led_state);
-        s_led_state = !s_led_state;
-        vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
-    }
-}*/
-
 extern "C" void app_main()
 {
     esp_err_t ret = nvs_flash_init();
@@ -219,10 +183,25 @@ extern "C" void app_main()
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    
-    app = new AntitheftApp();
-    EventMonitor::create_instance("serial");
-    app->run();
 
-    //xTaskCreate(keep_alive_task, "keep_alive_task", 2048, nullptr, 10, nullptr);
+    EventMonitor::create_serial();    
+    app = new AntitheftApp();
+    app->run();
+    /*
+    CmdStartUdpMonitor cmd {{1,2,3,4},5};
+    auto *em = create_udp_event_monitor(cmd);
+    em->start();
+    const char event[] = "test event";
+    em->send(event,sizeof(event));
+    em->stop();
+    EventMonitor::delete_instance(em);
+
+    esp_event_loop_handle_t event_loop = create_main_event_loop();
+    
+    CmdStartTcpController cmd1 {1,WifiMode::AP, "dupa", "123"};
+    auto *ctrl = create_tcp_controller(event_loop, cmd1);
+    ctrl->start();
+    ctrl->stop();
+    Controller::delete_instance(ctrl);
+    */
 }

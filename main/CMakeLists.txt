@@ -11,8 +11,6 @@ INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/components/event_monitor
 
 REQUIRES
-    esp_netif
     nvs_flash
-    driver
-    fmt
+    esp_event
 )

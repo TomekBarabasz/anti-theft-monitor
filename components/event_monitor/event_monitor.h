@@ -1,24 +1,19 @@
-#include <string>
-#include <fmt/core.h>
+#include <commands.h>
+
+
 
 struct EventMonitor
 {
-    enum class Severity {
-        debug,
-        info,
-        error
-    };
-    static EventMonitor* create_instance(const char* type,void* prms = nullptr);
-    static EventMonitor* get_instance();
+    static void create_udp(const CmdStartUdpMonitor&);
+    static void create_serial();
 
-    virtual bool send(EventMonitor::Severity s,const char* tag, std::string&& event) = 0;
-    virtual void release() = 0;
-    
+    static EventMonitor* get_instance() { return p_instance;}
+    static void delete_instance(EventMonitor*);
+    virtual int start() = 0;
+    virtual int send(const char*data,int size) = 0;
+    virtual void stop() = 0;
+
 protected:
-    virtual ~EventMonitor() {}
+    virtual ~EventMonitor(){}
+    inline static EventMonitor* p_instance {nullptr};
 };
-
-#define _LOG_E_(TAG,fmts,...) EventMonitor::get_instance()->send(\
-    EventMonitor::Severity::error, TAG, fmt::format(fmts, ##__VA_ARGS__));
-#define _LOG_I_(TAG,fmts,...) EventMonitor::get_instance()->send(\
-    EventMonitor::Severity::info, TAG, fmt::format(fmts, ##__VA_ARGS__));

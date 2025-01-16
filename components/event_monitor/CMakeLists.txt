@@ -1,10 +1,10 @@
 idf_component_register(
 SRCS
+    udp_event_monitor.cpp
+    serial_event_monitor.cpp
     event_monitor.cpp
 INCLUDE_DIRS 
     .
     ${CMAKE_SOURCE_DIR}/include
 REQUIRES
-    esp_event
-    fmt
 )

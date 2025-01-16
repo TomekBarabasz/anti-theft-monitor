@@ -9,7 +9,4 @@ INCLUDE_DIRS
 REQUIRES
     esp_event
     esp_wifi
-    driver
-    fmt
-    event_monitor
 )
